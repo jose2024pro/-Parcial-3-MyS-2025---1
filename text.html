@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simulador de Tanque de Agua</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    .container {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+    }
+    .inputs {
+      flex: 1;
+    }
+    .tank {
+      border: 2px solid #333;
+      position: relative;
+      background-color: #f0f0f0;
+    }
+    .water {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      background-color: #00f;
+      transition: height 0.2s;
+    }
+    canvas {
+      margin-top: 20px;
+    }
+    table {
+      margin-top: 20px;
+      border-collapse: collapse;
+      width: 400px;
+    }
+    th, td {
+      border: 1px solid #999;
+      padding: 8px;
+      text-align: center;
+    }
+    th {
+      background-color: #ddd;
+    }
+  </style>
+</head>
+<body>
+  <h1>Simulador de Tanque de Agua</h1>
+  <div class="container">
+    <div class="inputs">
+      <label>Radio del tanque (m): <input type="number" id="radio" value="0.5" step="0.1"></label><br><br>
+      <label>Altura del tanque (m): <input type="number" id="altura" value="2.0" step="0.1"></label><br><br>
+      <label>Caudal de entrada (m³/s): <input type="number" id="caudal" value="0.01" step="0.001"></label><br><br>
+      <label>Diámetro de salida (m): <input type="number" id="diametro" value="0.05" step="0.01"></label><br><br>
+      <button onclick="simular('llenado')">Simular Llenado</button>
+      <button onclick="simular('vaciado')">Simular Vaciado</button>
+      <button onclick="reiniciar()">Reiniciar</button><br><br>
+      <p id="tiempoEstimado"></p>
+      <p id="alturaActual">Altura actual: 0.00 m</p>
+    </div>
+    <div class="tank" id="tanque">
+      <div class="water" id="agua"></div>
+    </div>
+  </div>
+
+  <canvas id="graficoLlenado" width="400" height="200"></canvas>
+  <canvas id="graficoVaciado" width="400" height="200"></canvas>
+  <canvas id="graficoRegresion" width="400" height="200"></canvas>
+
+  <div id="tablaDatos"></div>
+
+  <script>
+    const g = 9.81;
+    let graficoLlenado = null;
+    let graficoVaciado = null;
+    let graficoRegresion = null;
+
+    function simular(tipo) {
+      const r = parseFloat(document.getElementById("radio").value);
+      const hMax = parseFloat(document.getElementById("altura").value);
+      const Q = parseFloat(document.getElementById("caudal").value);
+      const D = parseFloat(document.getElementById("diametro").value);
+
+      if (r <= 0 || hMax <= 0 || Q <= 0 || D <= 0) {
+        alert("Todos los valores deben ser mayores que cero.");
+        return;
+      }
+
+      const botones = document.querySelectorAll("button");
+      botones.forEach(btn => btn.disabled = true);
+
+      const A_tanque = Math.PI * r * r;
+      const V_tanque = A_tanque * hMax;
+
+      const tanque = document.getElementById("tanque");
+      tanque.style.width = `${r * 200}px`;
+      tanque.style.height = `${hMax * 150}px`;
+
+      const agua = document.getElementById("agua");
+      const alturaActual = document.getElementById("alturaActual");
+      const tiempoEstimado = document.getElementById("tiempoEstimado");
+
+      if (tipo === 'llenado') {
+        const tLlenado = V_tanque / Q;
+        tiempoEstimado.textContent = `Tiempo estimado de llenado: ${tLlenado.toFixed(2)} segundos.`;
+
+        const tVals = Array.from({ length: 100 }, (_, i) => i * tLlenado / 99);
+        const hLlenado = tVals.map(t => (Q * t) / A_tanque);
+
+        let i = 0;
+        const intervalo = setInterval(() => {
+          if (i >= hLlenado.length) {
+            clearInterval(intervalo);
+            alturaActual.textContent += ` - Llenado completo en ${tLlenado.toFixed(2)} s.`;
+            botones.forEach(btn => btn.disabled = false);
+          } else {
+            const nivel = (hLlenado[i] / hMax) * 100;
+            agua.style.height = nivel + "%";
+            alturaActual.textContent = `Altura actual: ${hLlenado[i].toFixed(2)} m`;
+            i++;
+          }
+        }, 50);
+
+        if (graficoLlenado) graficoLlenado.destroy();
+        graficoLlenado = new Chart(document.getElementById("graficoLlenado"), {
+          type: "line",
+          data: {
+            labels: tVals,
+            datasets: [{ label: "Llenado (m)", data: hLlenado, borderColor: "blue", fill: false }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { title: { display: true, text: "Tiempo (s)" } },
+              y: { title: { display: true, text: "Altura (m)" } }
+            }
+          }
+        });
+
+      } else if (tipo === 'vaciado') {
+        const A_salida = Math.PI * (D / 2) ** 2;
+        const k = A_salida * Math.sqrt(2 * g) / (2 * A_tanque);
+        const tVaciadoMax = Math.sqrt(hMax) / k;
+
+        tiempoEstimado.textContent = `Tiempo estimado de vaciado: ${tVaciadoMax.toFixed(2)} segundos.`;
+
+        const tDrain = Array.from({ length: 100 }, (_, i) => i * tVaciadoMax / 99);
+        const hVaciado = tDrain.map(t => (Math.sqrt(hMax) - k * t) ** 2);
+
+        let i = 0;
+        const intervalo = setInterval(() => {
+          if (i >= hVaciado.length) {
+            clearInterval(intervalo);
+            alturaActual.textContent += ` - Vaciado completo en ${tVaciadoMax.toFixed(2)} s.`;
+            botones.forEach(btn => btn.disabled = false);
+          } else {
+            const nivel = (hVaciado[i] / hMax) * 100;
+            agua.style.height = nivel + "%";
+            alturaActual.textContent = `Altura actual: ${hVaciado[i].toFixed(2)} m`;
+            i++;
+          }
+        }, 50);
+
+        if (graficoVaciado) graficoVaciado.destroy();
+        graficoVaciado = new Chart(document.getElementById("graficoVaciado"), {
+          type: "line",
+          data: {
+            labels: tDrain,
+            datasets: [{ label: "Vaciado (m)", data: hVaciado, borderColor: "red", fill: false }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { title: { display: true, text: "Tiempo (s)" } },
+              y: { title: { display: true, text: "Altura (m)" } }
+            }
+          }
+        });
+      }
+
+      // REGRESIÓN LINEAL Y TABLA
+      const caudales = [0.005, 0.01, 0.015, 0.02, 0.03];
+      const tiempos = caudales.map(q => (A_tanque * hMax) / q);
+
+      const n = caudales.length;
+      const sumX = caudales.reduce((a, b) => a + b, 0);
+      const sumY = tiempos.reduce((a, b) => a + b, 0);
+      const sumXY = caudales.reduce((acc, x, i) => acc + x * tiempos[i], 0);
+      const sumX2 = caudales.reduce((acc, x) => acc + x * x, 0);
+
+      const m = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+      const b = (sumY - m * sumX) / n;
+
+      const xLinea = [Math.min(...caudales), Math.max(...caudales)];
+      const yLinea = xLinea.map(x => m * x + b);
+
+      if (graficoRegresion) graficoRegresion.destroy();
+      graficoRegresion = new Chart(document.getElementById("graficoRegresion"), {
+        type: "scatter",
+        data: {
+          datasets: [
+            {
+              label: "Caudal vs Tiempo de Llenado",
+              data: caudales.map((q, i) => ({ x: q, y: tiempos[i] })),
+              backgroundColor: "green"
+            },
+            {
+              type: "line",
+              label: `y = ${m.toFixed(2)}x + ${b.toFixed(2)}`,
+              data: xLinea.map((x, i) => ({ x: x, y: yLinea[i] })),
+              borderColor: "lightgreen",
+              borderWidth: 2,
+              fill: false,
+              pointRadius: 0,
+              tension: 0
+            }
+          ]
+        },
+        options: {
+          plugins: {
+            title: {
+              display: true,
+              text: "Dispersión Caudal vs Tiempo de Llenado + Regresión Lineal"
+            }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: "Caudal (m³/s)" }
+            },
+            y: {
+              title: { display: true, text: "Tiempo de llenado (s)" }
+            }
+          }
+        }
+      });
+
+      // TABLA DE DATOS
+      let tablaHTML = `<h3>Tabla de Caudales vs Tiempos</h3><table><tr><th>Caudal (m³/s)</th><th>Tiempo (s)</th></tr>`;
+      caudales.forEach((q, i) => {
+        tablaHTML += `<tr><td>${q.toFixed(3)}</td><td>${tiempos[i].toFixed(2)}</td></tr>`;
+      });
+      tablaHTML += `</table>`;
+      document.getElementById("tablaDatos").innerHTML = tablaHTML;
+    }
+
+    function reiniciar() {
+      document.getElementById("agua").style.height = "0%";
+      document.getElementById("alturaActual").textContent = "Altura actual: 0.00 m";
+      document.getElementById("tiempoEstimado").textContent = "";
+      document.getElementById("tablaDatos").innerHTML = "";
+    }
+  </script>
+</body>
+</html>
